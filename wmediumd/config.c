@@ -71,13 +71,14 @@ static void string_to_mac_address(const char *str, u8 *addr)
 	addr[4] = (u8) a[4];
 	addr[5] = (u8) a[5];
 }
-
+// Get the SNR default value
 static int get_link_snr_default(struct wmediumd *ctx, struct station *sender,
 				 struct station *receiver)
 {
 	return SNR_DEFAULT;
 }
 
+// Get the SNR value from the SNR matrix
 static int get_link_snr_from_snr_matrix(struct wmediumd *ctx,
 					struct station *sender,
 					struct station *receiver)
@@ -85,6 +86,7 @@ static int get_link_snr_from_snr_matrix(struct wmediumd *ctx,
 	return ctx->snr_matrix[sender->index * ctx->num_stas + receiver->index];
 }
 
+// Get error prob from snr, rate_idx, freq, frame_len, src and dst
 static double _get_error_prob_from_snr(struct wmediumd *ctx, double snr,
 					   unsigned int rate_idx, u32 freq,
 					   int frame_len,
@@ -93,6 +95,7 @@ static double _get_error_prob_from_snr(struct wmediumd *ctx, double snr,
 	return get_error_prob_from_snr(snr, rate_idx, freq, frame_len);
 }
 
+// Get error prob from the error prob matrix, not apply to multicast
 static double get_error_prob_from_matrix(struct wmediumd *ctx, double snr,
 					 unsigned int rate_idx, u32 freq,
 					 int frame_len, struct station *src,
@@ -104,6 +107,7 @@ static double get_error_prob_from_matrix(struct wmediumd *ctx, double snr,
 	return ctx->error_prob_matrix[ctx->num_stas * src->index + dst->index];
 }
 
+// Determine if a error file is used
 int use_fixed_random_value(struct wmediumd *ctx)
 {
 	return ctx->error_prob_matrix != NULL || ctx->station_err_matrix != NULL;
@@ -116,6 +120,7 @@ int use_fixed_random_value(struct wmediumd *ctx)
  *
  * This function returns path loss [dBm].
  */
+
 static int calc_path_loss_free_space(void *model_param,
 			  struct station *dst, struct station *src)
 {

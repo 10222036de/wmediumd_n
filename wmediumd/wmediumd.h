@@ -32,6 +32,10 @@
 #define HWSIM_CMD_FRAME 2
 #define HWSIM_CMD_TX_INFO_FRAME 3
 
+#define MAC80211_HWSIM_TX_RC_MCS (1 << 3)
+#define MAC80211_HWSIM_TX_RC_GREEN_FIELD (1 << 4)
+#define MAC80211_HWSIM_TX_RC_40_MHZ (1 << 5)
+#define MAC80211_HWSIM_TX_RC_SHORT_GI (1 << 7)
 /**
  * enum hwsim_attrs - hwsim netlink attributes
  *
@@ -93,6 +97,7 @@ enum {
 	HWSIM_ATTR_NO_VIF,
 	HWSIM_ATTR_FREQ,
 	HWSIM_ATTR_PAD,
+	HWSIM_ATTR_TX_INFO_FLAGS,
 	__HWSIM_ATTR_MAX,
 };
 #define HWSIM_ATTR_MAX (__HWSIM_ATTR_MAX - 1)
@@ -202,12 +207,17 @@ struct wmediumd {
 	int (*get_fading_signal)(struct wmediumd *);
 
 	u8 log_lvl;
-};
+} __attribute__((packed));
 
 struct hwsim_tx_rate {
 	signed char idx;
 	unsigned char count;
-};
+} __attribute__((packed));
+
+struct hwsim_tx_rate_flags {
+	signed char idx;
+	unsigned short flags;
+} __attribute__((packed));
 
 struct frame {
 	struct list_head list;		/* frame queue list */
@@ -221,6 +231,7 @@ struct frame {
 	int tx_rates_count;
 	struct station *sender;
 	struct hwsim_tx_rate tx_rates[IEEE80211_TX_MAX_RATES];
+	struct hwsim_tx_rate_flags tx_flags[IEEE80211_TX_MAX_RATES];
 	size_t data_len;
 	u8 data[0];			/* frame contents */
 };
@@ -267,7 +278,11 @@ int set_default_per(struct wmediumd *ctx);
 int read_per_file(struct wmediumd *ctx, const char *file_name);
 int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);
 int w_flogf(struct wmediumd *ctx, u8 level, FILE *stream, const char *format, ...);
-int index_to_rate(size_t index, u32 freq);
+int index_to_NSS(int index);
+int index_to_BPSC(size_t index);
+int index_to_NSD(unsigned short flags)
+double index_to_FEC(int index);
+int index_to_rate(size_t index, u32 freq, unsigned short flags);
 void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest);
 
 #endif /* WMEDIUMD_H_ */

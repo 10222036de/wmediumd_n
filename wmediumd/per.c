@@ -228,7 +228,7 @@ static double per(double ber, enum fec_rate rate, int frame_len)
 		{ 14, 69, 654, 4996, 39677, 314973, 2503576, 19875546, 157824160, 1253169928 }
 	};
 
-	double p_d[ARRAY_SIZE(a_d[0])] = {};
+	double p_d[ARRAY_SIZE(a_d[0])] = {}; /* probability of error cho 10 hamming distance*/
 	double rho = ber;
 	double prob_uncorrected;
 	int k;
@@ -267,25 +267,25 @@ double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
 	int m;
 	enum fec_rate fec;
 	double ber;
-
+	double error = 0;
 	if (snr <= 0.0)
 		return 1.0;
 
-	if (freq > 5000)
-		    rate_idx += 4;
+	/*if (freq > 5000)
+	    rate_idx += 4; */
 
-	if (rate_idx >= rate_len)
+	if (rate_idx >= rate_len_GI_20)
 		return 1.0;
+	m = rateset_GI_20[rate_idx].mqam;
+	fec = rateset_GI_20[rate_idx].fec;
 
-	m = rateset[rate_idx].mqam;
-	fec = rateset[rate_idx].fec;
-
-	if (m == 2)
+	if (m == 2) {
 		ber = bpsk_ber(snr);
-	else
+	} else {
 		ber = mqam_ber(m, snr);
-
-	return per(ber, fec, frame_len);
+	}
+	//return per(ber, fec, frame_len);
+	return error;
 }
 
 static double get_error_prob_from_per_matrix(struct wmediumd *ctx, double snr,
@@ -319,6 +319,7 @@ int read_per_file(struct wmediumd *ctx, const char *file_name)
 	int signal;
 	size_t i;
 	float *temp;
+	/* apend the per file name with "ax"*/
 	const char *files[] = {"ax"};
 	int size = strlen(file_name) + strlen(files[0]) + 1;
 	char *filename = malloc(size);
@@ -326,6 +327,7 @@ int read_per_file(struct wmediumd *ctx, const char *file_name)
 	strcpy (filename, file_name);
     strcat (filename, files[0]);
 
+	/* Open the PER file */
 	fp = fopen(filename, "r");
 	if (fp == NULL) {
 		w_flogf(ctx, LOG_ERR, stderr,
@@ -365,7 +367,7 @@ int read_per_file(struct wmediumd *ctx, const char *file_name)
 
 		for (i = 0; i < rate_len; i++) {
 			if (fscanf(fp, "%f", &ctx->per_matrix[
-				(signal - ctx->per_matrix_signal_min) *
+				(signal - ctx->per_matrix_signal_min) * /*read and store the value at the index*/
 				rate_len + i]) == EOF) {
 				w_flogf(ctx, LOG_ERR, stderr,
 					"Not enough rate found\n");
@@ -374,17 +376,84 @@ int read_per_file(struct wmediumd *ctx, const char *file_name)
 		}
 	}
 
-	ctx->get_error_prob = get_error_prob_from_per_matrix;
+	ctx->get_error_prob = get_error_prob_from_per_matrix; /* set mode to achieve PER */
 
 	return EXIT_SUCCESS;
 }
 
-int index_to_rate(size_t index, u32 freq)
+int index_to_NSS(int index)
 {
-	if (freq > 5000)
-		index += 4;
-	if (index >= rate_len)
-		index = rate_len - 1;
+	if (index >= rate_len_GI_20)
+		index = rate_len_GI_20 - 1;
+	if (index < 8)
+		return 1;
+	else 
+		return 2;
 
-	return rateset[index].mbps;
+}
+
+int index_to_BPSC(size_t index)
+{
+	int N_BPSC = 0;
+	if (index >= rate_len_GI_20)
+		index = rate_len_GI_20 - 1;
+	N_BPSC = sqrt(rateset_GI_20[index].mqam);
+	return N_BPSC;
+}
+
+int index_to_NSD(unsigned short flags)
+{
+	
+	if (flags & MAC80211_HWSIM_TX_RC_40_MHZ)
+		return 108;
+	else
+		return 52;
+}
+
+double index_to_FEC(size_t index)
+{
+    if (index >= rate_len_GI_20)
+		index = rate_len_GI_20 - 1;
+	switch (rateset_GI_20[index].fec) {
+    case FEC_RATE_1_2:
+        return 0.5;
+
+    case FEC_RATE_2_3:
+        return 0.67;
+
+    case FEC_RATE_3_4:
+        return 0.75;
+
+    case FEC_RATE_4_5:
+        return 0.8;
+
+    case FEC_RATE_5_6:
+        return 0.83;
+
+    default:
+        return -1.0;
+    }
+}
+
+int index_to_rate(size_t index, u32 freq, unsigned short flags)
+{
+	int rate_mbps = 0;
+	/*if (freq > 5000)
+		index += 4; */
+	if (index >= rate_len_GI_20)
+		index = rate_len_GI_20 - 1;
+
+	if (flags & MAC80211_HWSIM_TX_RC_SHORT_GI) {
+		if (flags & MAC80211_HWSIM_TX_RC_40_MHZ)
+			rate_mbps = rateset_SGI_40[index].mbps;
+		else
+			rate_mbps = rateset_SGI_20[index].mbps;
+	} else {
+		if (flags & MAC80211_HWSIM_TX_RC_40_MHZ)
+			rate_mbps = rateset_GI_40[index].mbps;
+		else
+			rate_mbps = rateset_GI_20[index].mbps;
+	}
+
+	return rate_mbps;
 }

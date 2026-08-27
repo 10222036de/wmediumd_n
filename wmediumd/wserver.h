@@ -26,7 +26,7 @@
 
 struct request_ctx {
     struct wmediumd *ctx;
-    int sock_fd;
+    int sock_fd; // client socket
 };
 
 /**

@@ -44,9 +44,9 @@
 #define QOS_CTL_TAG1D_MASK	0x07
 
 enum ieee80211_ac_number {
-	IEEE80211_AC_VO		= 0,
+	IEEE80211_AC_VO		= 0, /*data*/
 	IEEE80211_AC_VI		= 1,
-	IEEE80211_AC_BE		= 2,
+	IEEE80211_AC_BE		= 2, /*qos*/
 	IEEE80211_AC_BK		= 3,
 };
 

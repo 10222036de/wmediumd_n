@@ -1,5 +1,10 @@
-*.o
 wmediumd/wmediumd
 tests/client_snr
 tests/client_errprob
 tests/client_specprob
+*.o
+*.so
+*.a
+*.out
+build/
+.vscode/
