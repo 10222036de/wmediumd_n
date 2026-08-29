@@ -236,6 +236,25 @@ struct frame {
 	u8 data[0];			/* frame contents */
 };
 
+#define MAX_AMPDU_FRAMES 64
+
+struct ampdu {
+    struct list_head list;
+
+    struct station *sender;
+
+    int frame_count;
+
+    struct frame *frames[MAX_AMPDU_FRAMES];
+
+    size_t psdu_len;
+
+    struct timespec expires;
+
+    int rate_idx;
+    u16 rate_flags;
+};
+
 struct log_distance_model_param {
 	double path_loss_exponent;
 	double Xg;
@@ -280,9 +299,11 @@ int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);
 int w_flogf(struct wmediumd *ctx, u8 level, FILE *stream, const char *format, ...);
 int index_to_NSS(int index);
 int index_to_BPSC(size_t index);
-int index_to_NSD(unsigned short flags)
-double index_to_FEC(int index);
+int index_to_NSD(unsigned short flags);
+double index_to_FEC(size_t index);
 int index_to_rate(size_t index, u32 freq, unsigned short flags);
 void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest);
+int index_to_NSD_1(unsigned short flags);
+int index_to_rate_1(size_t index);
 
 #endif /* WMEDIUMD_H_ */

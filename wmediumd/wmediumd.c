@@ -67,6 +67,41 @@ static inline int pkt_duration(struct wmediumd *ctx, int len, int rate)
 	return 16 + 4 + 4 * div_round((16 + 8 * len + 6) * 10, 4 * rate);
 }
 
+static bool ampdu_add_frame(struct ampdu *ampdu,
+                            struct frame *frame)
+{
+    if (ampdu->frame_count >= MAX_AMPDU_FRAMES)
+        return false;
+
+    ampdu->frames[ampdu->frame_count] = frame;
+    ampdu->frame_count++;
+
+    return true;
+}
+
+static size_t ampdu_get_length(struct ampdu *ampdu)
+{
+    size_t len = 0;
+
+    for (int i = 0; i < ampdu->frame_count; i++) {
+        size_t mpdu_len = ampdu->frames[i]->data_len;
+
+        /* 4-byte MPDU delimiter */
+        len += 4;
+        len += mpdu_len;
+
+        /* No normal padding after final MPDU */
+        if (i != ampdu->frame_count - 1) {
+            size_t padding =
+                (4 - (mpdu_len % 4)) % 4;
+
+            len += padding;
+        }
+    }
+
+    return len;
+}
+
 static inline double data_duration_n(struct wmediumd *ctx, int len, int rate_idx, unsigned short flags)
 {
 	/* preamble + signal + t_sym * n_sym, rate in 100 kbps */
@@ -78,12 +113,12 @@ static inline double data_duration_n(struct wmediumd *ctx, int len, int rate_idx
 	double N_SYM;
 	double T_SYM;
 
-	N_SD = index_to_NSD(flags);
+	N_SD = index_to_NSD_1(flags);
 	N_SS = index_to_NSS(rate_idx);
 	N_BPSC = index_to_BPSC(rate_idx);
 	R = index_to_FEC(rate_idx);
 			
-	N_DBPS = N_SD * N_BPSC * N_SS * R
+	N_DBPS = N_SD * N_BPSC * N_SS * R;
 
 	if (N_DBPS <= 0) {
 		w_logf(ctx, LOG_ERR, "Invalid N_DBPS value: %f\n", N_DBPS);
@@ -92,10 +127,12 @@ static inline double data_duration_n(struct wmediumd *ctx, int len, int rate_idx
 	
 	N_SYM = (8 * len + 16 + 6) / N_DBPS;
 
+	T_SYM = 3.2; /* microseconds */
+/*
 	if (flags & MAC80211_HWSIM_TX_RC_SHORT_GI)
 		T_SYM = 3.2;
 	else
-		T_SYM = 4.0;
+		T_SYM = 4.0; */
 	return T_SYM * N_SYM;
 }
 

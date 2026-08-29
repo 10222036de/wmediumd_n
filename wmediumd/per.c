@@ -401,13 +401,13 @@ int index_to_BPSC(size_t index)
 	return N_BPSC;
 }
 
-int index_to_NSD(unsigned short flags)
+int index_to_NSD_1(unsigned short flags)
 {
-	
+	int N_SD = 0;
 	if (flags & MAC80211_HWSIM_TX_RC_40_MHZ)
-		return 108;
-	else
-		return 52;
+		N_SD = 0;
+
+	return 52;
 }
 
 double index_to_FEC(size_t index)
@@ -435,11 +435,18 @@ double index_to_FEC(size_t index)
     }
 }
 
+int index_to_rate_1(size_t index)
+{
+	if (index >= rate_len_GI_20)
+		index = rate_len_GI_20 - 1;
+	return rateset_SGI_20[index].mbps;
+}
+
+/*
 int index_to_rate(size_t index, u32 freq, unsigned short flags)
 {
 	int rate_mbps = 0;
-	/*if (freq > 5000)
-		index += 4; */
+	
 	if (index >= rate_len_GI_20)
 		index = rate_len_GI_20 - 1;
 
@@ -457,3 +464,13 @@ int index_to_rate(size_t index, u32 freq, unsigned short flags)
 
 	return rate_mbps;
 }
+
+
+int index_to_NSD(unsigned short flags)
+{
+	
+	if (flags & MAC80211_HWSIM_TX_RC_40_MHZ)
+		return 108;
+	else
+		return 52;
+} */
