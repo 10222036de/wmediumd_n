@@ -27,6 +27,7 @@
 #define HWSIM_TX_CTL_REQ_TX_STATUS	1
 #define HWSIM_TX_CTL_NO_ACK		(1 << 1)
 #define HWSIM_TX_STAT_ACK		(1 << 2)
+#define HWSIM_TX_CTL_AMPDU  	(1 << 3)
 
 #define HWSIM_CMD_REGISTER 1
 #define HWSIM_CMD_FRAME 2
@@ -165,6 +166,7 @@ struct station {
 	int isap; 		/* verify whether the node is ap */
 	double freq;			/* frequency [Mhz] */
 	struct wqueue queues[IEEE80211_NUM_ACS];
+	struct ampdu *pending_ampdu;		/* current ampdu being received */
 	struct list_head list;
     int medium_id;
 };
@@ -219,15 +221,28 @@ struct hwsim_tx_rate_flags {
 	unsigned short flags;
 } __attribute__((packed));
 
+enum tx_type {
+    TX_FRAME,
+    TX_AMPDU,
+};
+
+struct tx_entry {
+    struct list_head list;
+    enum tx_type type;
+	struct timespec expires;
+    int duration;
+};
+
 struct frame {
-	struct list_head list;		/* frame queue list */
-	struct timespec expires;	/* frame delivery (absolute) */
+	struct list_head list;
+	struct tx_entry tx;		/* frame queue list */
+	//struct timespec expires;	/* frame delivery (absolute) */
 	bool acked;
 	u64 cookie;
 	u32 freq;
 	int flags;
 	int signal;
-	int duration;
+	//int duration;
 	int tx_rates_count;
 	struct station *sender;
 	struct hwsim_tx_rate tx_rates[IEEE80211_TX_MAX_RATES];
@@ -236,24 +251,28 @@ struct frame {
 	u8 data[0];			/* frame contents */
 };
 
-#define MAX_AMPDU_FRAMES 64
+#define MAX_AMPDU_FRAMES 2
 
 struct ampdu {
-    struct list_head list;
-
+	struct tx_entry tx;
+	struct station *receiver;
     struct station *sender;
-
+	
+	bool acked;
     int frame_count;
-
-    struct frame *frames[MAX_AMPDU_FRAMES];
-
+	int tx_rates_count;
+	//int flags;
+	//int signal;
+	struct frame *frames[MAX_AMPDU_FRAMES];
     size_t psdu_len;
 
-    struct timespec expires;
-
-    int rate_idx;
-    u16 rate_flags;
+    //struct timespec expires;
+	//struct hwsim_tx_rate tx_rates[IEEE80211_TX_MAX_RATES];
+	//struct hwsim_tx_rate_flags tx_flags[IEEE80211_TX_MAX_RATES];
+  
 };
+
+
 
 struct log_distance_model_param {
 	double path_loss_exponent;

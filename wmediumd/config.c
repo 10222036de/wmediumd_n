@@ -697,6 +697,7 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 			w_flogf(ctx, LOG_ERR, stderr, "Out of memory!\n");
 			return -ENOMEM;
 		}
+		
 		station->index = i;
 		memcpy(station->addr, addr, ETH_ALEN);
 		memcpy(station->hwaddr, addr, ETH_ALEN);
@@ -706,6 +707,7 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 		station->gRandom = GAUSS_RANDOM_DEFAULT;
 		station->isap = AP_DEFAULT;
 		station->medium_id = MEDIUM_ID_DEFAULT;
+		station->pending_ampdu = NULL;
 		station_init_queues(station);
 		list_add_tail(&station->list, &ctx->stations);
 		ctx->sta_array[i] = station;
