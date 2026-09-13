@@ -37,6 +37,11 @@
 #define MAC80211_HWSIM_TX_RC_GREEN_FIELD (1 << 4)
 #define MAC80211_HWSIM_TX_RC_40_MHZ (1 << 5)
 #define MAC80211_HWSIM_TX_RC_SHORT_GI (1 << 7)
+
+#define FCTL_STYPE        0xf0
+#define STYPE_NULLFUNC    0x40
+#define STYPE_QOS_DATA    0x80
+#define STYPE_QOS_NULL    0xc0
 /**
  * enum hwsim_attrs - hwsim netlink attributes
  *
@@ -251,7 +256,8 @@ struct frame {
 	u8 data[0];			/* frame contents */
 };
 
-#define MAX_AMPDU_FRAMES 2
+#define MAX_AMPDU_FRAMES 32
+#define AMPDU_TIMEOUT_US 1000 
 
 struct ampdu {
 	struct tx_entry tx;
@@ -265,7 +271,7 @@ struct ampdu {
 	//int signal;
 	struct frame *frames[MAX_AMPDU_FRAMES];
     size_t psdu_len;
-
+	struct timespec flush_deadline;
     //struct timespec expires;
 	//struct hwsim_tx_rate tx_rates[IEEE80211_TX_MAX_RATES];
 	//struct hwsim_tx_rate_flags tx_flags[IEEE80211_TX_MAX_RATES];
@@ -324,5 +330,5 @@ int index_to_rate(size_t index, u32 freq, unsigned short flags);
 void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest);
 int index_to_NSD_1(unsigned short flags);
 int index_to_rate_1(size_t index);
-
+int index_to_NDBPS(size_t index, unsigned short flags);
 #endif /* WMEDIUMD_H_ */

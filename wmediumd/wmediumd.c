@@ -67,23 +67,26 @@ static inline int pkt_duration(struct wmediumd *ctx, int len, int rate)
 	return 16 + 4 + 4 * div_round((16 + 8 * len + 6) * 10, 4 * rate);
 }
 
-static inline double data_duration_n(struct wmediumd *ctx, int len, int rate_idx, unsigned short flags)
+static inline int data_duration_n(struct wmediumd *ctx, int len, int rate_idx, unsigned short flags)
 {
 	/* preamble + signal + t_sym * n_sym, rate in 100 kbps */
+	/*
 	int N_SD;
 	int N_SS;
 	int N_BPSC;
 	double R;
-	double N_DBPS;
-	double N_SYM;
+	*/
+	int N_DBPS;
+	int N_SYM;
 	double T_SYM;
 
+	/*
 	N_SD = index_to_NSD_1(flags);
 	N_SS = index_to_NSS(rate_idx);
 	N_BPSC = index_to_BPSC(rate_idx);
 	R = index_to_FEC(rate_idx);
-			
-	N_DBPS = N_SD * N_BPSC * N_SS * R;
+	*/		
+	N_DBPS = index_to_NDBPS(rate_idx, flags);
 
 	if (N_DBPS <= 0) {
 		w_logf(ctx, LOG_ERR, "Invalid N_DBPS value: %f\n", N_DBPS);
@@ -92,7 +95,7 @@ static inline double data_duration_n(struct wmediumd *ctx, int len, int rate_idx
 	
 	N_SYM = (8 * len + 16 + 6) / N_DBPS;
 
-	T_SYM = 4.0; /* microseconds */
+	T_SYM = 4; /* microseconds */
 /*
 	if (flags & MAC80211_HWSIM_TX_RC_SHORT_GI)
 		T_SYM = 3.2;
@@ -101,7 +104,7 @@ static inline double data_duration_n(struct wmediumd *ctx, int len, int rate_idx
 	return T_SYM * N_SYM;
 }
 
-static inline double pkt_duration_n(struct wmediumd *ctx, int len, int rate_idx, unsigned short flags)
+static inline int pkt_duration_n(struct wmediumd *ctx, int len, int rate_idx, unsigned short flags)
 {
 	/* preamble + signal + t_sym * n_sym, rate in 100 kbps */
 	int T_OVERHEAD;
@@ -198,7 +201,7 @@ void rearm_timer(struct wmediumd *ctx)
 	list_for_each_entry(station, &ctx->stations, list) {
 		for (i = 0; i < IEEE80211_NUM_ACS; i++) {
 			tx = list_first_entry_or_null(&station->queues[i].frames,
-						      struct tx_entry, list);
+						     struct tx_entry, list);
 			/*get the first frame of each access mode*/	
 			if (tx && (!set_min_expires ||
 				      timespec_before(&tx->expires,
@@ -209,6 +212,13 @@ void rearm_timer(struct wmediumd *ctx)
 			/* if there is a frame that will be delivered sooner than the
 			 * current minimum, update the minimum */
 		}
+		if (station->pending_ampdu) {
+            struct ampdu *a = station->pending_ampdu;
+            if (!set_min_expires || timespec_before(&a->flush_deadline, &min_expires)) {
+                set_min_expires = true;
+                min_expires = a->flush_deadline;
+            }
+        }
 	}
 
 	if (set_min_expires) {
@@ -217,6 +227,33 @@ void rearm_timer(struct wmediumd *ctx)
 		timerfd_settime(ctx->timerfd, TFD_TIMER_ABSTIME, &expires,
 				NULL);
 	}
+}
+
+static void flush_expired_ampdus(struct wmediumd *ctx,
+                                 struct timespec *now)
+{
+    struct station *station;
+
+    list_for_each_entry(station, &ctx->stations, list) {
+
+        struct ampdu *ampdu = station->pending_ampdu;
+
+        if (!ampdu)
+            continue;
+
+        if (timespec_before(now,
+                            &ampdu->flush_deadline))
+            continue;
+
+        w_logf(ctx, LOG_INFO, "AMPDU timeout: sender=%p "
+               "frames=%d\n",
+               station,
+               ampdu->frame_count);
+
+        station->pending_ampdu = NULL;
+
+        queue_ampdu(ctx, station, ampdu);
+    }
 }
 
 static inline bool frame_has_a4(struct frame *frame)
@@ -247,6 +284,25 @@ static inline bool frame_is_data_qos(struct frame *frame)
 
 	return (hdr->frame_control[0] & (FCTL_FTYPE | STYPE_QOS_DATA)) ==
 		(FTYPE_DATA | STYPE_QOS_DATA);
+}
+
+static inline bool frame_is_null_data(struct frame *frame)
+{
+	struct ieee80211_hdr *hdr = (void *)frame->data;
+	u8 type_subtype;
+
+	type_subtype = hdr->frame_control[0] &
+		       (FCTL_FTYPE | FCTL_STYPE);
+
+	return type_subtype == (FTYPE_DATA | STYPE_NULLFUNC) ||
+	       type_subtype == (FTYPE_DATA | STYPE_QOS_NULL);
+}
+
+static inline bool frame_is_qos_payload(struct frame *frame)
+{
+    struct ieee80211_hdr *hdr = (void *)frame->data;
+
+    return (hdr->frame_control[0] & 0xfc) == 0x88;
 }
 /* Get the QoS control field from a frame */
 static inline u8 *frame_get_qos_ctl(struct frame *frame)
@@ -387,6 +443,12 @@ static struct ampdu *create_ampdu(struct wmediumd *ctx,
     ampdu->tx_rates_count = frame->tx_rates_count;
     ampdu->psdu_len = 0;
 
+	clock_gettime(CLOCK_MONOTONIC,
+                  &ampdu->flush_deadline);
+
+    timespec_add_usec(&ampdu->flush_deadline,
+                    AMPDU_TIMEOUT_US);
+
     /* Determine receiver from the first MPDU */
     hdr = (void *)frame->data;
 	u8 *dest = hdr->addr1;
@@ -404,13 +466,13 @@ static bool ampdu_frame_compatible(struct wmediumd *ctx, struct ampdu *ampdu, st
 {
 	
 	// Assumption: cung sender, tx_rates_count 
-	w_logf(ctx, LOG_DEBUG, "ampdu_compatible");
+	//w_logf(ctx, LOG_DEBUG, "ampdu_compatible");
 	if (ampdu->sender != frame->sender)
 		return false;
-	w_logf(ctx, LOG_DEBUG, "com1");
+	//w_logf(ctx, LOG_DEBUG, "com1");
 	if (ampdu->tx_rates_count != frame->tx_rates_count)
 		return false;
-	w_logf(ctx, LOG_DEBUG, "com2");
+	//w_logf(ctx, LOG_DEBUG, "com2");
 	/*
 	for (int i = 0; i < ampdu->tx_rates_count; i++) {
 		if (ampdu->tx_rates[i].idx != frame->tx_rates[i].idx ||
@@ -441,7 +503,7 @@ static void ampdu_add_frame(struct wmediumd *ctx,
 {
     struct ampdu *ampdu = sender->pending_ampdu;
 
-    w_logf(ctx, LOG_DEBUG, "ampdu_add_frame\n");
+   // w_logf(ctx, LOG_DEBUG, "ampdu_add_frame\n");
 
     /* IMPORTANT: don't dereference ampdu yet */
     w_logf(ctx, LOG_DEBUG,
@@ -472,14 +534,6 @@ static void ampdu_add_frame(struct wmediumd *ctx,
         sender->pending_ampdu = ampdu;
     }
 
-    w_logf(ctx, LOG_DEBUG,
-           "before dereference: ampdu=%p\n",
-           (void *)ampdu);
-
-    w_logf(ctx, LOG_DEBUG,
-           "D: sender=%p tx_rates_count=%d\n",
-           (void *)ampdu->sender,
-           ampdu->tx_rates_count);
     /*
      * Current frame cannot be aggregated with
      * the existing pending A-MPDU.
@@ -506,7 +560,7 @@ static void ampdu_add_frame(struct wmediumd *ctx,
 
         frame->sender->pending_ampdu = ampdu;
     }
-	w_logf(ctx, LOG_DEBUG, "ampdu_add_frame compatibility\n");
+	//w_logf(ctx, LOG_DEBUG, "ampdu_add_frame compatibility\n");
     /*
      * Add current MPDU.
      */
@@ -849,11 +903,11 @@ void queue_ampdu(struct wmediumd *ctx, struct station *station,
 		ampdu->tx.type = TX_AMPDU;
 		list_add_tail(&ampdu->tx.list, &queue->frames);
 		w_logf(ctx, LOG_DEBUG, "AMPDU: frames=%d len=%zu rate=%d flags=0x%04x duration=%d\n",
-       ampdu->frame_count,
-       ampdu->psdu_len,
-       rate_idx,
-       tx_flags,
-       send_time);
+			ampdu->frame_count,
+			ampdu->psdu_len,
+			rate_idx,
+			tx_flags,
+			send_time);
 		rearm_timer(ctx);
 	}	
 /*
@@ -865,8 +919,9 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 	struct nl_msg *msg;
 	int ret;
 
-    
-
+    w_logf(ctx, LOG_DEBUG, "Sending TX info frame to kernel: sender " MAC_FMT ", flags 0x%08x, signal %d, cookie %llu\n",
+		   MAC_ARGS(frame->sender->hwaddr), frame->flags, frame->signal, frame->cookie);
+	w_logf(ctx, LOG_DEBUG, "tx info frame: tx_rates_count %d\n", frame->tx_rates_count);
 	msg = nlmsg_alloc();
 	if (!msg) {
 		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
@@ -881,6 +936,8 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 		goto out;
 	}
 
+		
+	
 	if (nla_put(msg, HWSIM_ATTR_ADDR_TRANSMITTER, ETH_ALEN,
 		    frame->sender->hwaddr) ||
 	    nla_put_u32(msg, HWSIM_ATTR_FLAGS, frame->flags) ||
@@ -894,6 +951,7 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 			goto out;
 	}
 
+
 	ret = nl_send_auto_complete(sock, msg);
 	if (ret < 0) {
 		w_logf(ctx, LOG_ERR, "%s: nl_send_auto failed\n", __func__);
@@ -904,6 +962,7 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 
 out:
 	nlmsg_free(msg);
+	w_logf(ctx, LOG_DEBUG, "ret =%d\n", ret);
 	return ret;
 }
 
@@ -964,7 +1023,7 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 		ret = -1;
 		goto out;
 	}
-
+	w_logf(ctx, LOG_DEBUG, "cloned frame: frequency %d, rate_idx %d, signal %d\n", freq, rate_idx, signal);
 	if (nla_put(msg, HWSIM_ATTR_ADDR_RECEIVER, ETH_ALEN,
 		    dst->hwaddr) ||
 	    nla_put(msg, HWSIM_ATTR_FRAME, data_len, data) ||
@@ -1016,7 +1075,7 @@ int send_cloned_frame_msg_test(struct wmediumd *ctx, struct station *dst,
 		ret = -1;
 		goto out; 
 	}
-
+	w_logf(ctx, LOG_DEBUG, "cloned frame: frequency %d, rx_info 0x%08x, signal %d\n", freq, rx_info, signal);
 	if (nla_put(msg, HWSIM_ATTR_ADDR_RECEIVER, ETH_ALEN,
 		    dst->hwaddr) ||
 	    nla_put(msg, HWSIM_ATTR_FRAME, data_len, data) ||
@@ -1156,7 +1215,7 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 static void deliver_ampdu(struct wmediumd *ctx,
                           struct ampdu *ampdu)
 {
-    w_logf(ctx, LOG_DEBUG, "ampdu_deliver");
+    //w_logf(ctx, LOG_DEBUG, "ampdu_deliver\n");
 	if (ampdu->frames[0]->flags & HWSIM_TX_STAT_ACK) {
 		for (int i = 0;
 			i < ampdu->frame_count;
@@ -1372,8 +1431,7 @@ static int process_recvd_data(struct wmediumd *ctx, struct nlmsghdr *nlh)
 			if (frame_is_data(frame))
     			frame->flags |= HWSIM_TX_CTL_AMPDU;
 			
-			if (frame_is_data(frame) &&
-    			!(hdr->addr1[0] & 0x01)) {
+			if (frame_is_qos_payload(frame)) { 
 				ampdu_add_frame(ctx, sender, frame);
 			} else {
 				queue_frame(ctx, sender, frame);
@@ -1699,12 +1757,19 @@ static void timer_cb(int fd, short what, void *data)
 	struct wmediumd *ctx = data;
 	uint64_t u;
 
-	pthread_rwlock_rdlock(&snr_lock);
-	read(fd, &u, sizeof(u));
-	ctx->move_stations(ctx);
-	deliver_expired_frames(ctx);
-	rearm_timer(ctx);
-	pthread_rwlock_unlock(&snr_lock);
+	struct timespec now;
+    pthread_rwlock_rdlock(&snr_lock);
+    read(fd, &u, sizeof(u));
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    ctx->move_stations(ctx);
+
+    /* first flush any AMPDU that reached flush_deadline */
+    flush_expired_ampdus(ctx, &now);
+
+    deliver_expired_frames(ctx);
+    rearm_timer(ctx);
+    pthread_rwlock_unlock(&snr_lock);
 }
 
 int main(int argc, char *argv[])

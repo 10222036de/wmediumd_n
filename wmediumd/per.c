@@ -27,6 +27,7 @@ struct rate {
 	int mbps;
 	int mqam;
 	enum fec_rate fec;
+	int ndbps;
 };
 
 /*
@@ -58,22 +59,23 @@ static struct rate rateset_GI_20[] = {
 	 * For 802.11n: Based on http://mcsindex.com/
 	 *
 	 */
-	{ .mbps = 65, .mqam = 2, .fec = FEC_RATE_1_2 },
-	{ .mbps = 130, .mqam = 4, .fec = FEC_RATE_1_2 },
-	{ .mbps = 195, .mqam = 4, .fec = FEC_RATE_3_4 },
-	{ .mbps = 260, .mqam = 16, .fec = FEC_RATE_1_2 },
-	{ .mbps = 390, .mqam = 16, .fec = FEC_RATE_3_4 },
-	{ .mbps = 520, .mqam = 64, .fec = FEC_RATE_2_3 },
-	{ .mbps = 585, .mqam = 64, .fec = FEC_RATE_3_4 },
-	{ .mbps = 650, .mqam = 64, .fec = FEC_RATE_5_6 },
-	{ .mbps = 130, .mqam = 2, .fec = FEC_RATE_1_2 },
-	{ .mbps = 260, .mqam = 4, .fec = FEC_RATE_1_2 },
-	{ .mbps = 390, .mqam = 4, .fec = FEC_RATE_3_4 },
-	{ .mbps = 520, .mqam = 16, .fec = FEC_RATE_1_2 },
-	{ .mbps = 780, .mqam = 16, .fec = FEC_RATE_3_4 },
-	{ .mbps = 1040, .mqam = 64, .fec = FEC_RATE_2_3 },
-	{ .mbps = 1170, .mqam = 64, .fec = FEC_RATE_3_4 },
-	{ .mbps = 1300, .mqam = 64, .fec = FEC_RATE_4_5 },
+	{ .mbps = 65, .mqam = 2, .fec = FEC_RATE_1_2 , .ndbps = 26 },
+	{ .mbps = 130, .mqam = 4, .fec = FEC_RATE_1_2 , .ndbps = 52 },
+	{ .mbps = 195, .mqam = 4, .fec = FEC_RATE_3_4 , .ndbps = 78 },
+	{ .mbps = 260, .mqam = 16, .fec = FEC_RATE_1_2 , .ndbps = 104 },
+	{ .mbps = 390, .mqam = 16, .fec = FEC_RATE_3_4 , .ndbps = 156 },
+	{ .mbps = 520, .mqam = 64, .fec = FEC_RATE_2_3 , .ndbps = 208 },
+	{ .mbps = 585, .mqam = 64, .fec = FEC_RATE_3_4 , .ndbps = 234 },
+	{ .mbps = 650, .mqam = 64, .fec = FEC_RATE_5_6 , .ndbps = 260 },
+	{ .mbps = 130, .mqam = 2, .fec = FEC_RATE_1_2 , .ndbps = 52 },
+	{ .mbps = 260, .mqam = 4, .fec = FEC_RATE_1_2 , .ndbps = 108 },
+	{ .mbps = 390, .mqam = 4, .fec = FEC_RATE_3_4 , .ndbps = 156 },
+	{ .mbps = 520, .mqam = 16, .fec = FEC_RATE_1_2 , .ndbps = 208 },
+	{ .mbps = 780, .mqam = 16, .fec = FEC_RATE_3_4 , .ndbps = 312 },
+	{ .mbps = 1040, .mqam = 64, .fec = FEC_RATE_2_3 , .ndbps = 416 },
+	{ .mbps = 1170, .mqam = 64, .fec = FEC_RATE_3_4 , .ndbps = 468 },
+	{ .mbps = 1300, .mqam = 64, .fec = FEC_RATE_5_6 , .ndbps = 520 },
+	
 };
 static size_t rate_len_GI_20 = ARRAY_SIZE(rateset_GI_20);
 
@@ -106,22 +108,22 @@ static struct rate rateset_GI_40[] = {
 	 * For 802.11n: Based on http://mcsindex.com/
 	 *
 	 */
-	{ .mbps = 135, .mqam = 2, .fec = FEC_RATE_1_2 },
-	{ .mbps = 270, .mqam = 4, .fec = FEC_RATE_1_2 },
-	{ .mbps = 405, .mqam = 4, .fec = FEC_RATE_3_4 },
-	{ .mbps = 540, .mqam = 16, .fec = FEC_RATE_1_2 },
-	{ .mbps = 810, .mqam = 16, .fec = FEC_RATE_3_4 },
-	{ .mbps = 1080, .mqam = 64, .fec = FEC_RATE_2_3 },
-	{ .mbps = 1215, .mqam = 64, .fec = FEC_RATE_3_4 },
-	{ .mbps = 1350, .mqam = 64, .fec = FEC_RATE_5_6 },
-	{ .mbps = 270, .mqam = 2, .fec = FEC_RATE_1_2 },
-	{ .mbps = 540, .mqam = 4, .fec = FEC_RATE_1_2 },
-	{ .mbps = 810, .mqam = 4, .fec = FEC_RATE_3_4 },
-	{ .mbps = 1080, .mqam = 16, .fec = FEC_RATE_1_2 },
-	{ .mbps = 1620, .mqam = 16, .fec = FEC_RATE_3_4 },
-	{ .mbps = 2160, .mqam = 64, .fec = FEC_RATE_2_3 },
-	{ .mbps = 2430, .mqam = 64, .fec = FEC_RATE_3_4 },
-	{ .mbps = 2700, .mqam = 64, .fec = FEC_RATE_5_6 },
+	{ .mbps = 135, .mqam = 2, .fec = FEC_RATE_1_2 , .ndbps = 54 },
+	{ .mbps = 270, .mqam = 4, .fec = FEC_RATE_1_2 , .ndbps = 108 },
+	{ .mbps = 405, .mqam = 4, .fec = FEC_RATE_3_4 , .ndbps = 162 },
+	{ .mbps = 540, .mqam = 16, .fec = FEC_RATE_1_2 , .ndbps = 216 },
+	{ .mbps = 810, .mqam = 16, .fec = FEC_RATE_3_4 , .ndbps = 324 },
+	{ .mbps = 1080, .mqam = 64, .fec = FEC_RATE_2_3 , .ndbps = 432 },
+	{ .mbps = 1215, .mqam = 64, .fec = FEC_RATE_3_4 , .ndbps = 486 },
+	{ .mbps = 1350, .mqam = 64, .fec = FEC_RATE_5_6 , .ndbps = 540 },
+	{ .mbps = 270, .mqam = 2, .fec = FEC_RATE_1_2 , .ndbps = 108 },
+	{ .mbps = 540, .mqam = 4, .fec = FEC_RATE_1_2 , .ndbps = 216 },
+	{ .mbps = 810, .mqam = 4, .fec = FEC_RATE_3_4 , .ndbps = 324 },
+	{ .mbps = 1080, .mqam = 16, .fec = FEC_RATE_1_2 , .ndbps = 432 },
+	{ .mbps = 1620, .mqam = 16, .fec = FEC_RATE_3_4 , .ndbps = 648 },
+	{ .mbps = 2160, .mqam = 64, .fec = FEC_RATE_2_3 , .ndbps = 864 },
+	{ .mbps = 2430, .mqam = 64, .fec = FEC_RATE_3_4 , .ndbps = 972 },
+	{ .mbps = 2700, .mqam = 64, .fec = FEC_RATE_5_6 , .ndbps = 1080 },
 };
 static size_t rate_len_GI_40 = ARRAY_SIZE(rateset_GI_40);
 
@@ -397,7 +399,7 @@ int index_to_BPSC(size_t index)
 	int N_BPSC = 0;
 	if (index >= rate_len_GI_20)
 		index = rate_len_GI_20 - 1;
-	N_BPSC = sqrt(rateset_GI_20[index].mqam);
+	N_BPSC = log2(rateset_GI_20[index].mqam);
 	return N_BPSC;
 }
 
@@ -474,3 +476,15 @@ int index_to_NSD(unsigned short flags)
 	else
 		return 52;
 } */
+
+int index_to_NDBPS(size_t index, unsigned short flags)
+{
+
+	if (index >= 16)
+        index = 15;
+
+    if (flags & MAC80211_HWSIM_TX_RC_40_MHZ)
+        return rateset_GI_40[index].ndbps; // For 40 MHz, N_DBPS is doubled
+
+    return rateset_GI_20[index].ndbps;
+}
