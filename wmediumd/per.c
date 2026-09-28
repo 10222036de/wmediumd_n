@@ -214,7 +214,7 @@ static double mqam_ber(int m, double snr_db)
 static double per(double ber, enum fec_rate rate, int frame_len)
 {
 	/* free distances for each fec_rate */
-	int d_free[] = { 10, 6, 5 };
+	int d_free[] = { 10, 6, 5, 4, 4 };
 
 	/* initial rate code coefficients */
 	double a_d[5][10] = {
@@ -269,7 +269,7 @@ double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
 	int m;
 	enum fec_rate fec;
 	double ber;
-	double error = 0;
+	//double error = 0;
 	if (snr <= 0.0)
 		return 1.0;
 
@@ -286,8 +286,7 @@ double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
 	} else {
 		ber = mqam_ber(m, snr);
 	}
-	//return per(ber, fec, frame_len);
-	return error;
+	return per(ber, fec, frame_len);
 }
 
 static double get_error_prob_from_per_matrix(struct wmediumd *ctx, double snr,

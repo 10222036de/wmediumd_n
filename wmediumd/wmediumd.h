@@ -257,6 +257,7 @@ struct frame {
 };
 
 #define MAX_AMPDU_FRAMES 32
+#define MAX_AMPDU_LEN 65535
 #define AMPDU_TIMEOUT_US 1000 
 
 struct ampdu {
@@ -268,9 +269,10 @@ struct ampdu {
     int frame_count;
 	int tx_rates_count;
 	//int flags;
-	//int signal;
+	int signal;
 	struct frame *frames[MAX_AMPDU_FRAMES];
     size_t psdu_len;
+	size_t last_padding;
 	struct timespec flush_deadline;
     //struct timespec expires;
 	//struct hwsim_tx_rate tx_rates[IEEE80211_TX_MAX_RATES];

@@ -93,14 +93,12 @@ static inline int data_duration_n(struct wmediumd *ctx, int len, int rate_idx, u
 		return -1;
 	}
 	
-	N_SYM = (8 * len + 16 + 6) / N_DBPS;
+	N_SYM = ceil((8 * len + 16 + 6) / N_DBPS);
 
-	T_SYM = 4; /* microseconds */
-/*
 	if (flags & MAC80211_HWSIM_TX_RC_SHORT_GI)
-		T_SYM = 3.2;
+		T_SYM = 3.6;
 	else
-		T_SYM = 4.0; */
+		T_SYM = 4.0;
 	return T_SYM * N_SYM;
 }
 
@@ -469,18 +467,20 @@ static bool ampdu_frame_compatible(struct wmediumd *ctx, struct ampdu *ampdu, st
 	//w_logf(ctx, LOG_DEBUG, "ampdu_compatible");
 	if (ampdu->sender != frame->sender)
 		return false;
+/* 	if (ampdu->receiver != get_station_by_addr(ctx, ((struct ieee80211_hdr *)frame->data)->addr1))
+		return false; */
 	//w_logf(ctx, LOG_DEBUG, "com1");
 	if (ampdu->tx_rates_count != frame->tx_rates_count)
 		return false;
 	//w_logf(ctx, LOG_DEBUG, "com2");
-	/*
-	for (int i = 0; i < ampdu->tx_rates_count; i++) {
-		if (ampdu->tx_rates[i].idx != frame->tx_rates[i].idx ||
-			ampdu->tx_flags[i].flags != frame->tx_flags[i].flags) {
+	
+	/* for (int i = 0; i < ampdu->tx_rates_count; i++) {
+		if (ampdu->frames[0]->tx_rates[i].idx != frame->tx_rates[i].idx ||
+			ampdu->frames[0]->tx_flags[i].flags != frame->tx_flags[i].flags) {
 			return false;
 		}
-	}
-	*/
+	} */
+	
 	return true;
 }
 //chua check
@@ -489,6 +489,11 @@ static bool ampdu_should_flush(struct ampdu *ampdu)
     //w_logf(ctx, LOG_DEBUG, "ampdu_flush");
 	if (ampdu->frame_count >= MAX_AMPDU_FRAMES)
         return true;
+
+	if (ampdu->psdu_len >= MAX_AMPDU_LEN)
+		return true;
+
+	/*
 	/*
     if (ampdu_calculate_length(ampdu)
             >= MAX_AMPDU_LEN)
@@ -506,24 +511,20 @@ static void ampdu_add_frame(struct wmediumd *ctx,
    // w_logf(ctx, LOG_DEBUG, "ampdu_add_frame\n");
 
     /* IMPORTANT: don't dereference ampdu yet */
-    w_logf(ctx, LOG_DEBUG,
+    /* w_logf(ctx, LOG_DEBUG,
            "pending_ampdu raw pointer = %p\n",
-           (void *)ampdu);
+           (void *)ampdu); */
 
-    if (!ampdu) {
-        w_logf(ctx, LOG_DEBUG,
-               "A: pending_ampdu == NULL\n");
+	if (!ampdu) {
+		w_logf(ctx, LOG_DEBUG,
+			"A: pending_ampdu == NULL\n");
 
-        w_logf(ctx, LOG_DEBUG,
+        /* w_logf(ctx, LOG_DEBUG,
                "B: frame=%p sender=%p\n",
                (void *)frame,
-               (void *)sender);
+               (void *)sender); */
 
         ampdu = create_ampdu(ctx, frame);
-
-        w_logf(ctx, LOG_DEBUG,
-               "C: create_ampdu returned %p\n",
-               (void *)ampdu);
 
         if (!ampdu) {
             w_logf(ctx, LOG_ERR,
@@ -540,71 +541,59 @@ static void ampdu_add_frame(struct wmediumd *ctx,
      */
     if (!ampdu_frame_compatible(ctx, ampdu, frame)) {
 
-        frame->sender->pending_ampdu = NULL;
-
         queue_ampdu(ctx,
-                    ampdu->sender,
-                    ampdu);
-		w_logf(ctx, LOG_DEBUG, "1\n");
+                    sender,
+                    sender->pending_ampdu);
+		sender->pending_ampdu = NULL;
         /*
          * Current frame becomes the first member
          * of a new A-MPDU.
          */
         ampdu = create_ampdu(ctx, frame);
-		w_logf(ctx, LOG_DEBUG, "2\n");
         if (!ampdu) {
             w_logf(ctx, LOG_ERR,
                    "Failed to create new A-MPDU\n");
             return;
         }
 
-        frame->sender->pending_ampdu = ampdu;
+        sender->pending_ampdu = ampdu;
     }
 	//w_logf(ctx, LOG_DEBUG, "ampdu_add_frame compatibility\n");
     /*
      * Add current MPDU.
      */
-    ampdu->frames[ampdu->frame_count] = frame;
-    ampdu->frame_count++;
+    sender->pending_ampdu->frames[sender->pending_ampdu->frame_count] = frame;
+    sender->pending_ampdu->frame_count++;
 
     w_logf(ctx, LOG_DEBUG,
            "A-MPDU now contains %d MPDUs\n",
-           ampdu->frame_count);
+           sender->pending_ampdu->frame_count);
     /*
      * Aggregate is complete.
      */
-    if (ampdu_should_flush(ampdu)) {
+	size_t len = frame->data_len;
 
-        frame->sender->pending_ampdu = NULL;
+    if (sender->pending_ampdu->frame_count > 0)
+        sender->pending_ampdu->psdu_len += sender->pending_ampdu->last_padding;
 
-        queue_ampdu(ctx,
-                    ampdu->sender,
-                    ampdu);
+    sender->pending_ampdu->psdu_len += 4 + len;
+
+    sender->pending_ampdu->last_padding = (-len) & 3;
+
+    if (ampdu_should_flush(sender->pending_ampdu)) {
+
+        w_logf(ctx, LOG_DEBUG, "flush AMPDU");
+		queue_ampdu(ctx,
+                    sender,
+                    sender->pending_ampdu);
+		sender->pending_ampdu = NULL;
     }
 }
 
-static size_t ampdu_calculate_length(struct ampdu *ampdu)
+static inline size_t ampdu_calculate_length(struct ampdu *ampdu)
 {
-    size_t total = 0;
-	//w_logf(ctx, LOG_DEBUG, "ampdu_calc_length");
-    for (int i = 0; i < ampdu->frame_count; i++) {
-
-        size_t mpdu_len =
-            ampdu->frames[i]->data_len;
-
-        /* MPDU delimiter */
-        total += 4;
-
-        /* MPDU */
-        total += mpdu_len;
-
-        /* Padding except final subframe */
-        if (i != ampdu->frame_count - 1)
-            total +=
-                (4 - (mpdu_len % 4)) % 4;
-    }
-
-    return total;
+   
+    return ampdu->psdu_len;
 }
 
 
@@ -638,62 +627,242 @@ void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *d
         dest-> medium_id = medium_id;
     }
 }
-	void queue_frame(struct wmediumd *ctx, struct station *station,
-			struct frame *frame)
+void queue_frame(struct wmediumd *ctx, struct station *station,
+		struct frame *frame)
+{
+	struct ieee80211_hdr *hdr = (void *)frame->data;
+	u8 *dest = hdr->addr1;
+	struct timespec now, target;
+	struct wqueue *queue;
+	//struct frame *tail;
+	struct station *tmpsta, *deststa;
+	int send_time;
+	int cw;
+	double error_prob;
+	bool is_acked = false;
+	bool noack = false;
+	int i, j;
+	int rate_idx;
+	int ac;
+	struct tx_entry *tail;
+
+	/* TODO configure phy parameters */
+	int slot_time = 9;
+	int sifs = 16;
+	//int slottime = 0;
+	//int sifs1 = 0;
+	int difs = 2 * slot_time + sifs;
+	int retries = 0;
+	
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	int ack_time_usec = pkt_duration_n(ctx, 14, 0, frame->tx_flags[0].flags) +
+			sifs;
+
+	/*
+	* To determine a frame's expiration time, we compute the
+	* number of retries we might have to make due to radio conditions
+	* or contention, and add backoff time accordingly.  To that, we
+	* add the expiration time of the previous frame in the queue.
+	*/
+
+	ac = frame_select_queue_80211(frame);
+	queue = &station->queues[ac];
+
+	/* try to "send" this frame at each of the rates in the rateset */
+	send_time = 0;
+	cw = queue->cw_min;
+
+	int snr = 0;
+
+	if (is_multicast_ether_addr(dest)) {
+		deststa = NULL;
+		snr = 15;
+	} else {
+		deststa = get_station_by_addr(ctx, dest);
+		if (deststa) {
+			w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
+				MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
+				MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta");
+			detect_mediums(ctx,station,deststa);
+			snr = ctx->get_link_snr(ctx, station, deststa) -
+				get_signal_offset_by_interference(ctx,
+					station->index, deststa->index);
+			snr += ctx->get_fading_signal(ctx);
+		}
+	}
+	frame->signal = snr + NOISE_LEVEL;
+
+	noack = frame_is_mgmt(frame) || is_multicast_ether_addr(dest);
+	double choice = -3.14;
+
+	if (use_fixed_random_value(ctx))
+		choice = drand48();
+
+	for (i = 0; i < frame->tx_rates_count && !is_acked; i++) {
+
+		rate_idx = frame->tx_rates[i].idx;
+		
+		/* no more rates in MRR */
+		if (rate_idx < 0)
+			break;
+		
+		//w_logf(ctx, LOG_DEBUG, "Crash at wlogf index to rate");
+		w_logf(ctx, LOG_DEBUG, "Trying rate %d\n", rate_idx);
+		//w_logf(ctx, LOG_DEBUG, "Crash at error prob");
+		if (frame_is_null_data(frame)) {
+				error_prob = 0.0;
+
+				w_logf(ctx, LOG_DEBUG,
+					"NULLFUNC: bypass PER, SNR=%d rate=%d len=%d\n",
+					snr, rate_idx, frame->data_len);
+			} else {
+				error_prob = ctx->get_error_prob(ctx, snr, rate_idx,
+								frame->freq,
+								frame->data_len,
+								station, deststa);
+			}
+
+		w_logf(ctx, LOG_DEBUG, "SNR %d dB, error prob %f\n", snr, error_prob);
+		//w_logf(ctx, LOG_DEBUG, "Crash at send time");
+		for (j = 0; j < frame->tx_rates[i].count; j++) {
+			send_time += difs + pkt_duration_n(ctx, frame->data_len,
+				rate_idx, frame->tx_flags[i].flags);
+
+			retries++;
+
+			/* skip ack/backoff/retries for noack frames */
+			if (noack) {
+				is_acked = true;
+				break;
+			}
+
+			/* TODO TXOPs */
+
+			/* backoff */
+			if (j > 0) {
+				send_time += (cw * slot_time) / 2;
+				cw = (cw << 1) + 1;
+				if (cw > queue->cw_max)
+					cw = queue->cw_max;
+			}
+			if (!use_fixed_random_value(ctx))
+				choice = drand48();
+			if (choice > error_prob) {
+				is_acked = true;
+				break;
+			}
+			send_time += ack_time_usec;
+		}
+	}
+	if (is_acked) {
+		frame->tx_rates[i-1].count = j + 1;
+		for (; i < frame->tx_rates_count; i++) {
+			frame->tx_rates[i].idx = -1;
+			frame->tx_rates[i].count = -1;
+		}
+		frame->flags |= HWSIM_TX_STAT_ACK;
+	}
+
+	/*
+	* delivery time starts after any equal or higher prio frame
+	* (or now, if none).
+	*/
+	target = now;
+	w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is #%d\n", MAC_ARGS(station->addr), station->medium_id);
+	list_for_each_entry(tmpsta, &ctx->stations, list) {
+		if (station->medium_id == tmpsta->medium_id) {
+			w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is also #%d\n", MAC_ARGS(tmpsta->addr),
+				tmpsta->medium_id);
+			for (i = 0; i <= ac; i++) {
+				tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
+											struct tx_entry, list);
+				if (tail && timespec_before(&target, &tail->expires))
+					target = tail->expires;
+			}
+		} else {
+			w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is not #%d, it is #%d\n", MAC_ARGS(tmpsta->addr),
+				station->medium_id, tmpsta->medium_id);
+		}
+	}
+
+	timespec_add_usec(&target, send_time);
+
+	frame->tx.type = TX_FRAME;
+	frame->tx.duration = send_time;
+	frame->tx.expires = target;
+	list_add_tail(&frame->tx.list, &queue->frames);
+	rearm_timer(ctx);
+	//w_logf(ctx, LOG_ERR, "Pass Queue_frame\n");	
+}
+
+void queue_ampdu(struct wmediumd *ctx, struct station *station,
+			struct ampdu *ampdu)
 	{
-		struct ieee80211_hdr *hdr = (void *)frame->data;
+		struct ieee80211_hdr *hdr = (void *)ampdu->frames[0]->data;
 		u8 *dest = hdr->addr1;
 		struct timespec now, target;
 		struct wqueue *queue;
-		//struct frame *tail;
+		struct tx_entry *tail;
 		struct station *tmpsta, *deststa;
 		int send_time;
 		int cw;
 		double error_prob;
 		bool is_acked = false;
 		bool noack = false;
-		int i, j;
+		int i, j, h;
 		int rate_idx;
 		int ac;
-		struct tx_entry *tail;
-
-		/* TODO configure phy parameters */
+		
+			/* TODO configure phy parameters */
 		int slot_time = 9;
 		int sifs = 16;
 		//int slottime = 0;
 		//int sifs1 = 0;
 		int difs = 2 * slot_time + sifs;
 		int retries = 0;
+		int block_ack_time_usec = 0;
 		
+		w_logf(ctx, LOG_DEBUG, "ampdu_queue\n");
+		//safety check
+		if (!ampdu || ampdu->frame_count <= 0)
+    		return;
+
+		// Assumption: no retransmission, no ack_time, every MPDU is succeeded
 		clock_gettime(CLOCK_MONOTONIC, &now);
 
-		int ack_time_usec = pkt_duration_n(ctx, 14, 0, frame->tx_flags[0].flags) +
-				sifs;
-
-		/*
-		* To determine a frame's expiration time, we compute the
-		* number of retries we might have to make due to radio conditions
-		* or contention, and add backoff time accordingly.  To that, we
-		* add the expiration time of the previous frame in the queue.
-		*/
-
-		ac = frame_select_queue_80211(frame);
+		//Them ack_time
+		int snr = 15;
+		//Select queue
+		ac = frame_select_queue_80211(ampdu->frames[0]);
 		queue = &station->queues[ac];
 
-		/* try to "send" this frame at each of the rates in the rateset */
 		send_time = 0;
 		cw = queue->cw_min;
-
-		int snr = SNR_DEFAULT;
+		if (is_multicast_ether_addr(dest)) {
+			deststa = NULL;
+		} else {
+			deststa = get_station_by_addr(ctx, dest);
+			if (deststa) {
+					/* w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
+						MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
+						MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta"); */
+					detect_mediums(ctx,station,deststa);
+					snr = ctx->get_link_snr(ctx, station, deststa) -
+						get_signal_offset_by_interference(ctx,
+							station->index, deststa->index);
+					snr += ctx->get_fading_signal(ctx);
+				}
+			}		
 
 		if (is_multicast_ether_addr(dest)) {
 			deststa = NULL;
 		} else {
 			deststa = get_station_by_addr(ctx, dest);
 			if (deststa) {
-				w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
+				/* w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
 					MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
-					MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta");
+					MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta"); */
 				detect_mediums(ctx,station,deststa);
 				snr = ctx->get_link_snr(ctx, station, deststa) -
 					get_signal_offset_by_interference(ctx,
@@ -701,46 +870,51 @@ void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *d
 				snr += ctx->get_fading_signal(ctx);
 			}
 		}
-		frame->signal = snr + NOISE_LEVEL;
 
-		noack = frame_is_mgmt(frame) || is_multicast_ether_addr(dest);
+		ampdu->signal = snr + NOISE_LEVEL;
+
 		double choice = -3.14;
+
+		noack = is_multicast_ether_addr(dest);
 
 		if (use_fixed_random_value(ctx))
 			choice = drand48();
+		w_logf(ctx, LOG_DEBUG, "ampdu_queue: rate_idx=%zu and first frame rate_idx=%d, %d, %d, %d\n",
+			rate_idx, ampdu->frames[0]->tx_rates[0].idx, ampdu->frames[0]->tx_rates[1].idx, ampdu->frames[0]->tx_rates[2].idx, ampdu->frames[0]->tx_rates[3].idx);
+		for (i = 0; i < ampdu->frames[0]->tx_rates_count && !is_acked; i++) {
+			  w_logf(ctx, LOG_DEBUG,
+           "BEFORE: i=%d count=%d idx=%d\n",
+           i,
+           ampdu->frames[0]->tx_rates_count,
+           ampdu->frames[0]->tx_rates[i].idx);
 
-		for (i = 0; i < frame->tx_rates_count && !is_acked; i++) {
+    rate_idx = ampdu->frames[0]->tx_rates[i].idx;
 
-			rate_idx = frame->tx_rates[i].idx;
-			
-			/* no more rates in MRR */
+    w_logf(ctx, LOG_DEBUG,
+           "AFTER: i=%d rate_idx=%zu idx=%d\n",
+           i,
+           rate_idx,
+           ampdu->frames[0]->tx_rates[i].idx);
 			if (rate_idx < 0)
 				break;
-			
-			
-			
-			//w_logf(ctx, LOG_DEBUG, "Crash at wlogf index to rate");
-			w_logf(ctx, LOG_DEBUG, "Trying rate %d)\n", rate_idx);
-			//w_logf(ctx, LOG_DEBUG, "Crash at error prob");
 			error_prob = ctx->get_error_prob(ctx, snr, rate_idx,
-							frame->freq, frame->data_len,
+							ampdu->frames[0]->freq, ampdu->psdu_len,
 							station, deststa);
 			w_logf(ctx, LOG_DEBUG, "SNR %d dB, error prob %f\n", snr, error_prob);
-			//w_logf(ctx, LOG_DEBUG, "Crash at send time");
-			for (j = 0; j < frame->tx_rates[i].count; j++) {
-				send_time += difs + pkt_duration_n(ctx, frame->data_len,
-					rate_idx, frame->tx_flags[i].flags);
-
+			for (j = 0; j < ampdu->frames[0]->tx_rates[i].count; j++) {
+				send_time += difs + pkt_duration_n(ctx, ampdu->psdu_len,
+					rate_idx, ampdu->frames[0]->tx_flags[i].flags);
+				
+				w_logf(ctx, LOG_DEBUG, "j= %d, send_time= %d\n", j, send_time);
+				w_logf(ctx, LOG_DEBUG, "test");
 				retries++;
-
-				/* skip ack/backoff/retries for noack frames */
 				if (noack) {
 					is_acked = true;
 					break;
 				}
 
 				/* TODO TXOPs */
-
+				w_logf(ctx, LOG_DEBUG, "cw = %d\n", cw);
 				/* backoff */
 				if (j > 0) {
 					send_time += (cw * slot_time) / 2;
@@ -754,128 +928,26 @@ void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *d
 					is_acked = true;
 					break;
 				}
-				send_time += ack_time_usec;
+				if (is_acked) {
+					block_ack_time_usec = pkt_duration_n(ctx, 32*ampdu->frame_count, 0, 0) + sifs;
+				}
+				send_time += block_ack_time_usec;
 			}
 		}
 		if (is_acked) {
-			frame->tx_rates[i-1].count = j + 1;
-			for (; i < frame->tx_rates_count; i++) {
-				frame->tx_rates[i].idx = -1;
-				frame->tx_rates[i].count = -1;
-			}
-			frame->flags |= HWSIM_TX_STAT_ACK;
-		}
-
-		/*
-		* delivery time starts after any equal or higher prio frame
-		* (or now, if none).
-		*/
-		target = now;
-		w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is #%d\n", MAC_ARGS(station->addr), station->medium_id);
-		list_for_each_entry(tmpsta, &ctx->stations, list) {
-			if (station->medium_id == tmpsta->medium_id) {
-				w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is also #%d\n", MAC_ARGS(tmpsta->addr),
-					tmpsta->medium_id);
-				for (i = 0; i <= ac; i++) {
-					tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
-												struct tx_entry, list);
-					if (tail && timespec_before(&target, &tail->expires))
-						target = tail->expires;
+			
+			for (h = 0; h < ampdu->frame_count; h++) {
+				ampdu->frames[h]->tx_rates[i-1].count = j + 1;
+				for (; i < ampdu->frames[0]->tx_rates_count; i++) {
+					ampdu->frames[h]->tx_rates[i].idx = -1;
+					ampdu->frames[h]->tx_rates[i].count = -1;
 				}
-			} else {
-				w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is not #%d, it is #%d\n", MAC_ARGS(tmpsta->addr),
-					station->medium_id, tmpsta->medium_id);
+			ampdu->frames[h]->flags |= HWSIM_TX_STAT_ACK;
 			}
+			
 		}
-
-		timespec_add_usec(&target, send_time);
-
-		frame->tx.type = TX_FRAME;
-		frame->tx.duration = send_time;
-		frame->tx.expires = target;
-		list_add_tail(&frame->tx.list, &queue->frames);
-		rearm_timer(ctx);
-		//w_logf(ctx, LOG_ERR, "Pass Queue_frame\n");	
-	}
-
-void queue_ampdu(struct wmediumd *ctx, struct station *station,
-			struct ampdu *ampdu)
-	{
-		struct ieee80211_hdr *hdr = (void *)ampdu->frames[0]->data;
-		u8 *dest = hdr->addr1;
-		struct timespec now, target;
-		struct wqueue *queue;
-		struct tx_entry *tail;
-		struct station *tmpsta, *deststa;
-		int send_time;
-		int cw;
-		//double error_prob;
-		bool is_acked = false;
-		bool noack = false;
-		int i;
-		int rate_idx;
-		int ac;
-		
-			/* TODO configure phy parameters */
-		int slot_time = 9;
-		int sifs = 16;
-		//int slottime = 0;
-		//int sifs1 = 0;
-		int difs = 2 * slot_time + sifs;
-		int retries = 0;
-		
-		w_logf(ctx, LOG_DEBUG, "ampdu_queue");
-		//safety check
-		if (!ampdu || ampdu->frame_count <= 0)
-    		return;
-
-		// Assumption: no retransmission, no ack_time, every MPDU is succeeded
-		clock_gettime(CLOCK_MONOTONIC, &now);
-
-		//Them ack_time
-
-		ampdu->psdu_len = ampdu_calculate_length(ampdu);
-		
-		//Select queue
-		ac = frame_select_queue_80211(ampdu->frames[0]);
-		queue = &station->queues[ac];
-
-		/* try to "send" this frame at each of the rates in the rateset */
-		send_time = 0;
-		cw = queue->cw_min;
-
-		int snr = SNR_DEFAULT;
-
-		if (is_multicast_ether_addr(dest)) {
-			deststa = NULL;
-		} else {
-			deststa = get_station_by_addr(ctx, dest);
-			if (deststa) {
-				w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
-					MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
-					MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta");
-				detect_mediums(ctx,station,deststa);
-				snr = ctx->get_link_snr(ctx, station, deststa) -
-					get_signal_offset_by_interference(ctx,
-						station->index, deststa->index);
-				snr += ctx->get_fading_signal(ctx);
-			}
-		}
-		
-		for (i = 0; i < ampdu->frame_count; i++)
-        	ampdu->frames[i]->signal = snr + NOISE_LEVEL;
-		
-		rate_idx = ampdu->frames[0]->tx_rates[0].idx;
-		unsigned short tx_flags = ampdu->frames[0]->tx_flags[0].flags;
 
 		//noack = frame_is_mgmt(frame) || is_multicast_ether_addr(dest);
-
-		send_time += difs + pkt_duration_n(ctx, ampdu->psdu_len, rate_idx, tx_flags);
-		is_acked = 1;
-		if (is_acked) {
-			for (i = 0; i < ampdu->frame_count; i++)
-        		ampdu->frames[i]->flags |= HWSIM_TX_STAT_ACK;
-		}
 		
 		target = now;
 		w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is #%d\n", 
@@ -896,6 +968,7 @@ void queue_ampdu(struct wmediumd *ctx, struct station *station,
 					station->medium_id, tmpsta->medium_id);
 			}
 		}
+		
 		timespec_add_usec(&target, send_time);
 
 		ampdu->tx.duration = send_time;
@@ -905,9 +978,10 @@ void queue_ampdu(struct wmediumd *ctx, struct station *station,
 		w_logf(ctx, LOG_DEBUG, "AMPDU: frames=%d len=%zu rate=%d flags=0x%04x duration=%d\n",
 			ampdu->frame_count,
 			ampdu->psdu_len,
-			rate_idx,
-			tx_flags,
-			send_time);
+			ampdu->frames[0]->tx_rates[0].idx,
+			ampdu->frames[0]->flags,
+			send_time
+			);
 		rearm_timer(ctx);
 	}	
 /*
@@ -919,9 +993,9 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 	struct nl_msg *msg;
 	int ret;
 
-    w_logf(ctx, LOG_DEBUG, "Sending TX info frame to kernel: sender " MAC_FMT ", flags 0x%08x, signal %d, cookie %llu\n",
+    /* w_logf(ctx, LOG_DEBUG, "Sending TX info frame to kernel: sender " MAC_FMT ", flags 0x%08x, signal %d, cookie %llu\n",
 		   MAC_ARGS(frame->sender->hwaddr), frame->flags, frame->signal, frame->cookie);
-	w_logf(ctx, LOG_DEBUG, "tx info frame: tx_rates_count %d\n", frame->tx_rates_count);
+	w_logf(ctx, LOG_DEBUG, "tx info frame: tx_rates_count %d\n", frame->tx_rates_count); */
 	msg = nlmsg_alloc();
 	if (!msg) {
 		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
@@ -1023,7 +1097,7 @@ int send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 		ret = -1;
 		goto out;
 	}
-	w_logf(ctx, LOG_DEBUG, "cloned frame: frequency %d, rate_idx %d, signal %d\n", freq, rate_idx, signal);
+	// w_logf(ctx, LOG_DEBUG, "cloned frame: frequency %d, rate_idx %d, signal %d\n", freq, rate_idx, signal);
 	if (nla_put(msg, HWSIM_ATTR_ADDR_RECEIVER, ETH_ALEN,
 		    dst->hwaddr) ||
 	    nla_put(msg, HWSIM_ATTR_FRAME, data_len, data) ||
@@ -1388,9 +1462,7 @@ static int process_recvd_data(struct wmediumd *ctx, struct nlmsghdr *nlh)
 			
 			w_logf(ctx, LOG_DEBUG, "TX_INFO_FLAGS len = %d\n",
        		nla_len(attrs[HWSIM_ATTR_TX_INFO_FLAGS]));
-
-			w_logf(ctx, LOG_DEBUG, "sizeof(struct hwsim_tx_rate_flag) = %zu\n",
-       		sizeof(struct hwsim_tx_rate_flags));
+			
 			for (int i = 0; i < IEEE80211_TX_MAX_RATES; i++) {
     			w_logf(ctx, LOG_DEBUG, "[%d] idx=%d flags=0x%04x\n", 
 						i, tx_flags[i].idx, tx_flags[i].flags);
@@ -1430,7 +1502,7 @@ static int process_recvd_data(struct wmediumd *ctx, struct nlmsghdr *nlh)
 			
 			if (frame_is_data(frame))
     			frame->flags |= HWSIM_TX_CTL_AMPDU;
-			
+
 			if (frame_is_qos_payload(frame)) { 
 				ampdu_add_frame(ctx, sender, frame);
 			} else {
@@ -1873,6 +1945,7 @@ int main(int argc, char *argv[])
 
 		w_logf(&ctx, LOG_NOTICE, "Input configuration file: %s\n", config_file);
 	}
+	ctx.nakagami_param = NULL;
 	INIT_LIST_HEAD(&ctx.stations);
 	if (load_config(&ctx, config_file, per_file, full_dynamic)) {
 		return EXIT_FAILURE;
@@ -1925,6 +1998,7 @@ int main(int argc, char *argv[])
 	free(ctx.cb);
 	free(ctx.intf);
 	free(ctx.per_matrix);
+	free(ctx.nakagami_param);
 
 	return EXIT_SUCCESS;
 }
